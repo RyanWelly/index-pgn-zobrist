@@ -10,16 +10,18 @@ use std::fs::File;
 mod db;
 
 fn main() -> anyhow::Result<()> {
-    // let sqlite_db = ChessDatabase(Connection::open("./output.db")?);
-    let sqlite_db = ChessDatabase(Connection::open_in_memory()?);
+    let sqlite_db = ChessDatabase(Connection::open("./output/output.db")?);
+    // let sqlite_db = ChessDatabase(Connection::open_in_memory()?);
 
     // Create table for games
 
-    let file = File::open("example-pgns/WellingtonChessclub-2024-V1.pgn")?;
+    let file = File::open("./example-pgns/WellingtonChessclub-2024-V1.pgn")?;
     let mut reader = BufferedReader::new(file);
     let mut visitor = GameUploader::new(sqlite_db);
     // let pos = reader.read_game(&mut visitor)?;
     reader.read_all(&mut visitor)?;
+
+    // Test the database by playing some moves and finding games which reach it.
 
     Ok(())
 }
@@ -129,6 +131,18 @@ impl Visitor for GameUploader {
             &self.game_date,
             &self.moves,
         );
+
+        // Debug print every 100 or so games to reassure that we're doing something
+        if self.current_id % 100 == 0 {
+            let debug_white_name = self.game_info.white.as_deref().unwrap_or("NN");
+            let debug_black_name = self.game_info.black.as_deref().unwrap_or("NN");
+            let debug_date = &self.game_date;
+
+            println!(
+                "Uploaded {} games, last game was {} vs {} on {}",
+                self.current_id, debug_white_name, debug_black_name, debug_date
+            );
+        }
 
         // reset state
         self.prepare_for_next_game();

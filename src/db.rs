@@ -9,6 +9,7 @@ impl ChessDatabase {
         // E.g. putting all the player names into a single table will probably cut down the size of the database.
         // At the moment I'm planning to put the database onto Cloudflare D1, which has a database limit of 50MB.
         // I could cut the database into multiple databases, but that is kinda annoying
+        // UPDATE: turns out I can do something like https://phiresky.github.io/blog/2021/hosting-sqlite-databases-on-github-pages/ instead. This is incredible
         self.0
             .execute_batch(
                 "
@@ -52,10 +53,10 @@ impl ChessDatabase {
 
         stmt.execute(params![game_id, white, black, event, moves, date])
             .unwrap(); // TODO add proper error handling (bubble up with anyhow)
-
-        println!("Added game: {} vs {}, {}", white, black, date);
     }
 
+    // TODO: optimise space in zobrist by only having one row for each zobrist and a JSON column (containing game ids, moves and move nums)
+    // Storing json like this will save many rows, and also we're all web shits here so storing JSON in our database is just good practice
     pub(crate) fn insert_zobrist(&self, zhash: u64, id: u64, san: SanPlus, move_num: u16) {
         let mut stmt = self
             .0
