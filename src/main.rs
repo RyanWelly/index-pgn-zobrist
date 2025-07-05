@@ -1,6 +1,6 @@
 use crate::db::ChessDatabase;
 use pgn_reader::{BufferedReader, SanPlus, Skip, Visitor};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use shakmaty::{
     CastlingMode, Chess, Position,
     fen::Fen,
@@ -23,10 +23,9 @@ fn main() -> anyhow::Result<()> {
     let mut visitor = GameUploader::new(sqlite_db);
 
     reader.read_all(&mut visitor)?;
+    transaction.commit()?;
 
     // TODO: Test the database by outputting some games did the ruy lopez occur in.
-
-    let db = visitor.db.0;
 
     let ruy_lopez: Fen =
         "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3".parse()?;
@@ -35,23 +34,19 @@ fn main() -> anyhow::Result<()> {
         .zobrist_hash::<Zobrist64>(shakmaty::EnPassantMode::Legal)
         .into();
 
-    let mut test_smt = db
+    let mut test_smt = connection
         .prepare(
             "
         SELECT white, black
         FROM games
-        WHERE game_id IN (
-            SELECT game_id
-            FROM zobrist
-            WHERE zhash = ?) LIMIT 20;",
+        LIMIT 20;",
         )
         .unwrap();
-    let mut rows = test_smt.query([zhash.to_le()]).unwrap();
+    // let mut rows = test_smt.query([zhash.to_le()]).unwrap();
+    let mut rows = test_smt.query([]).unwrap();
 
     while let Some(row) = rows.next()? {
-        let white: String = row.get(0)?;
-        let black: String = row.get(1)?;
-        println!("{} vs {}", white, black);
+        println!("{row:?}");
     }
 
     Ok(())
