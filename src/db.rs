@@ -1,9 +1,10 @@
 use pgn_reader::{San, SanPlus};
 use rusqlite::{ToSql, params};
 
-pub(crate) struct ChessDatabase(pub(crate) rusqlite::Connection);
+// When the transaction is dropped, all pending queries are commited.
+pub(crate) struct ChessDatabase<'a>(pub(crate) &'a rusqlite::Transaction<'a>);
 
-impl ChessDatabase {
+impl ChessDatabase<'_> {
     pub(crate) fn create_tables(&self) -> rusqlite::Result<()> {
         // TODO: experiment with more tables to cut down the size.
         // E.g. putting all the player names into a single table will probably cut down the size of the database.

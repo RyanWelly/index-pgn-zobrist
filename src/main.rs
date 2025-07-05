@@ -1,8 +1,9 @@
 use crate::db::ChessDatabase;
 use pgn_reader::{BufferedReader, SanPlus, Skip, Visitor};
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use shakmaty::{
-    Chess, Position,
+    CastlingMode, Chess, Position,
+    fen::Fen,
     zobrist::{Zobrist32, Zobrist64, ZobristHash},
 };
 use std::fs::File;
@@ -10,7 +11,9 @@ use std::fs::File;
 mod db;
 
 fn main() -> anyhow::Result<()> {
-    let sqlite_db = ChessDatabase(Connection::open("./output/output.db")?);
+    let mut connection = Connection::open("./output/output.db")?;
+    let transaction = connection.transaction()?;
+    let sqlite_db = ChessDatabase(&transaction);
     // let sqlite_db = ChessDatabase(Connection::open_in_memory()?);
 
     // Create table for games
@@ -18,16 +21,44 @@ fn main() -> anyhow::Result<()> {
     let file = File::open("./example-pgns/WellingtonChessclub-2024-V1.pgn")?;
     let mut reader = BufferedReader::new(file);
     let mut visitor = GameUploader::new(sqlite_db);
-    // let pos = reader.read_game(&mut visitor)?;
+
     reader.read_all(&mut visitor)?;
 
-    // Test the database by playing some moves and finding games which reach it.
+    // TODO: Test the database by outputting some games did the ruy lopez occur in.
+
+    let db = visitor.db.0;
+
+    let ruy_lopez: Fen =
+        "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3".parse()?;
+    let pos: Chess = ruy_lopez.into_position(CastlingMode::Standard)?;
+    let zhash: u64 = pos
+        .zobrist_hash::<Zobrist64>(shakmaty::EnPassantMode::Legal)
+        .into();
+
+    let mut test_smt = db
+        .prepare(
+            "
+        SELECT white, black
+        FROM games
+        WHERE game_id IN (
+            SELECT game_id
+            FROM zobrist
+            WHERE zhash = ?) LIMIT 20;",
+        )
+        .unwrap();
+    let mut rows = test_smt.query([zhash.to_le()]).unwrap();
+
+    while let Some(row) = rows.next()? {
+        let white: String = row.get(0)?;
+        let black: String = row.get(1)?;
+        println!("{} vs {}", white, black);
+    }
 
     Ok(())
 }
 
-struct GameUploader {
-    db: ChessDatabase,
+struct GameUploader<'a> {
+    db: ChessDatabase<'a>,
     position: Chess,
     game_info: GameInfo,
     current_id: u64, // u32::MAX is only 4 billion so this is hilarious future proofing
@@ -51,15 +82,15 @@ impl GameInfo {
     }
 }
 
-impl GameUploader {
-    fn new(db: ChessDatabase) -> GameUploader {
+impl GameUploader<'_> {
+    fn new<'a>(db: ChessDatabase<'a>) -> GameUploader<'a> {
         db.create_tables().expect("Database tables created");
         GameUploader {
             db,
             position: Chess::default(),
             game_info: GameInfo::default(),
             current_id: 0,
-            move_num: 0,
+            move_num: 1,
             game_date: String::new(),
             moves: String::new(),
         }
@@ -70,16 +101,16 @@ impl GameUploader {
         self.game_info.reset();
         self.position = Chess::default();
         self.game_date.clear();
-        self.move_num = 0;
+        self.move_num = 1;
         self.current_id += 1;
         self.moves.clear();
     }
 }
 
-// The visitor:
-// - Records all tag information and main line moves, and sends a simplified pgn to the games
+// For each game, the visitor:
+// - Records all tag information and main line moves, and sends a simplified pgn to the games table
 // - creates an entry in the zobrist table for each move
-impl Visitor for GameUploader {
+impl Visitor for GameUploader<'_> {
     type Result = ();
 
     fn begin_game(&mut self) {
@@ -87,17 +118,18 @@ impl Visitor for GameUploader {
     }
 
     fn tag(&mut self, name: &[u8], value: pgn_reader::RawTag<'_>) {
-        if name == b"White" {
-            self.game_info.white = Some(value.decode_utf8_lossy().into_owned());
-        } else if name == b"Black" {
-            self.game_info.black = Some(value.decode_utf8_lossy().into_owned());
-        } else if name == b"Event" {
-            self.game_info.event = Some(value.decode_utf8_lossy().into_owned());
+        // TODO: possibly worth encoding names and such as &[u8] instead of String/&str
+
+        match name {
+            b"White" => self.game_info.white = Some(value.decode_utf8_lossy().into_owned()),
+            b"Black" => self.game_info.black = Some(value.decode_utf8_lossy().into_owned()),
+            b"Event" => self.game_info.event = Some(value.decode_utf8_lossy().into_owned()),
+            b"Date" => self.game_info.event = Some(value.decode_utf8_lossy().into_owned()),
+            _ => {}
         }
     }
 
     fn san(&mut self, san_plus: SanPlus) {
-        // We use u32 for the moment because sqlite's INTEGER is a signed 8 byte integer. TODO: change to storing zobrist as a blob
         let zhash = self
             .position
             .zobrist_hash::<Zobrist64>(shakmaty::EnPassantMode::Legal);
@@ -106,13 +138,14 @@ impl Visitor for GameUploader {
         self.db
             .insert_zobrist(zhash.into(), self.current_id, san_plus, self.move_num);
 
-        // add move to move list
+        // TODO: add move to move list
         // We keep moves in the terrible form "e4:e5:Nf3:Nc6".
 
         // update position for next move
         if let Ok(m) = san_plus.san.to_move(&self.position) {
             self.position.play_unchecked(m);
         }
+        self.move_num += 1;
     }
 
     fn begin_variation(&mut self) -> Skip {
@@ -122,7 +155,6 @@ impl Visitor for GameUploader {
 
     fn end_game(&mut self) -> Self::Result {
         // Send the game to the sqlite database
-
         self.db.insert_full_game(
             self.current_id,
             self.game_info.white.as_deref().unwrap_or("NN"),
@@ -132,8 +164,8 @@ impl Visitor for GameUploader {
             &self.moves,
         );
 
-        // Debug print every 100 or so games to reassure that we're doing something
-        if self.current_id % 100 == 0 {
+        // Debug print every 50 or so games to reassure that we're doing something
+        if self.current_id % 50 == 0 {
             let debug_white_name = self.game_info.white.as_deref().unwrap_or("NN");
             let debug_black_name = self.game_info.black.as_deref().unwrap_or("NN");
             let debug_date = &self.game_date;
@@ -143,9 +175,6 @@ impl Visitor for GameUploader {
                 self.current_id, debug_white_name, debug_black_name, debug_date
             );
         }
-
-        // reset state
-        self.prepare_for_next_game();
     }
 }
 
