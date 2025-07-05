@@ -1,20 +1,20 @@
 use crate::db::ChessDatabase;
 use pgn_reader::{BufferedReader, SanPlus, Skip, Visitor};
-use rusqlite::{Connection, Transaction};
+use rusqlite::Connection;
 use shakmaty::{
     CastlingMode, Chess, Position,
     fen::Fen,
-    zobrist::{Zobrist32, Zobrist64, ZobristHash},
+    zobrist::{Zobrist64, ZobristHash},
 };
 use std::fs::File;
 
 mod db;
 
 fn main() -> anyhow::Result<()> {
+    // Connect to database
     let mut connection = Connection::open("./output/output.db")?;
     let transaction = connection.transaction()?;
     let sqlite_db = ChessDatabase(&transaction);
-    // let sqlite_db = ChessDatabase(Connection::open_in_memory()?);
 
     // Create table for games
 
@@ -124,7 +124,7 @@ impl Visitor for GameUploader<'_> {
             b"White" => self.game_info.white = Some(value.decode_utf8_lossy().into_owned()),
             b"Black" => self.game_info.black = Some(value.decode_utf8_lossy().into_owned()),
             b"Event" => self.game_info.event = Some(value.decode_utf8_lossy().into_owned()),
-            b"Date" => self.game_info.event = Some(value.decode_utf8_lossy().into_owned()),
+            b"Date" => self.game_date = value.decode_utf8_lossy().into_owned(),
             _ => {}
         }
     }

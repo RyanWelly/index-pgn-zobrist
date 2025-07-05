@@ -1,5 +1,5 @@
-use pgn_reader::{San, SanPlus};
-use rusqlite::{ToSql, params};
+use pgn_reader::SanPlus;
+use rusqlite::params;
 
 // When the transaction is dropped, all pending queries are commited.
 pub(crate) struct ChessDatabase<'a>(pub(crate) &'a rusqlite::Transaction<'a>);
