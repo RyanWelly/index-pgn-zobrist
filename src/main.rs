@@ -11,19 +11,25 @@ use std::fs::File;
 mod db;
 
 fn main() -> anyhow::Result<()> {
-    // Connect to database
-    let mut connection = Connection::open("./output/output.db")?;
+    // Command line arguments
+    let input_pgn = std::env::args().nth(1).expect("No path to input pgn given");
+    let output_db_path = std::env::args().nth(2).expect("no pattern given");
+
+    // Open pgn file and connect to database
+
+    let file = File::open(input_pgn)?;
+    let mut connection = Connection::open(output_db_path)?;
     let transaction = connection.transaction()?;
     let sqlite_db = ChessDatabase(&transaction);
 
     // Create table for games
 
-    let file = File::open("./example-pgns/WellingtonChessclub-2024-V1.pgn")?;
     let mut reader = BufferedReader::new(file);
     let mut visitor = GameUploader::new(sqlite_db);
 
     reader.read_all(&mut visitor)?;
     transaction.commit()?;
+    println!("Commited all games to database");
 
     // TODO: Test the database by outputting some games did the ruy lopez occur in.
 
@@ -166,7 +172,7 @@ impl Visitor for GameUploader<'_> {
             let debug_date = &self.game_date;
 
             println!(
-                "Uploaded {} games, last game was {} vs {} on {}",
+                "Inserted {} games, last game was {} vs {} on {}",
                 self.current_id, debug_white_name, debug_black_name, debug_date
             );
         }
