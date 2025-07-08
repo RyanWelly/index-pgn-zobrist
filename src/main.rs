@@ -53,8 +53,7 @@ fn main() -> anyhow::Result<()> {
         LIMIT 20;",
         )
         .unwrap();
-    let mut rows = test_smt.query([zhash.to_le()]).unwrap();
-    // let mut rows = test_smt.query([]).unwrap();
+    let mut rows = test_smt.query([]).unwrap();
 
     while let Some(row) = rows.next()? {
         println!("{row:?}");
@@ -146,6 +145,8 @@ impl Visitor for GameUploader<'_> {
 
         // TODO: add move to move list
         // We keep moves in the terrible form "e4:e5:Nf3:Nc6".
+        self.moves.push(':');
+        self.moves.push_str(&san_plus.to_string());
 
         // update position for next move
         if let Ok(m) = san_plus.san.to_move(&self.position) {
