@@ -39,17 +39,22 @@ fn main() -> anyhow::Result<()> {
     let zhash: u64 = pos
         .zobrist_hash::<Zobrist64>(shakmaty::EnPassantMode::Legal)
         .into();
+    let zhash_bytes = zhash.to_le_bytes();
+    println!("Hash is: {zhash:x}");
 
     let mut test_smt = connection
         .prepare(
             "
-        SELECT white, black
+        SELECT white
         FROM games
+        WHERE game_id = (
+        SELECT game_id FROM zobrist WHERE zhash = X'D153379AA166BB7C'
+        )
         LIMIT 20;",
         )
         .unwrap();
-    // let mut rows = test_smt.query([zhash.to_le()]).unwrap();
-    let mut rows = test_smt.query([]).unwrap();
+    let mut rows = test_smt.query([zhash.to_le()]).unwrap();
+    // let mut rows = test_smt.query([]).unwrap();
 
     while let Some(row) = rows.next()? {
         println!("{row:?}");
