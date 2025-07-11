@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         SELECT white
         FROM games
         WHERE game_id = (
-        SELECT game_id FROM zobrist WHERE zhash = X'D153379AA166BB7C'
+        SELECT FROM json_each(zobrist.game_ids_moves) WHERE zhash = X'D153379AA166BB7C'
         )
         LIMIT 20;",
         )
@@ -141,7 +141,7 @@ impl Visitor for GameUploader<'_> {
 
         // Insert zobrist hash of position, the game id, the move, and the move number into the zobrist table
         self.db
-            .insert_zobrist(zhash.into(), self.current_id, san_plus, self.move_num);
+            .insert_zobrist(zhash.into(), self.current_id, san_plus);
 
         // TODO: add move to move list
         // We keep moves in the terrible form "e4:e5:Nf3:Nc6".

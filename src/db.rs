@@ -11,7 +11,11 @@ impl ChessDatabase<'_> {
         // At the moment I'm planning to put the database onto Cloudflare D1, which has a database limit of 50MB.
         // I could cut the database into multiple databases, but that is kinda annoying
         // UPDATE: turns out I can do something like https://phiresky.github.io/blog/2021/hosting-sqlite-databases-on-github-pages/ instead. This is incredible
-        self.0
+
+        // For tables, we have one table storing all game information, and one storing zhash information.
+        // the Zhash json field looks like "[{game_id: 5, move_san: 'Na3'}, ... ] "
+        let return_value = self
+            .0
             .execute_batch(
                 "
             CREATE TABLE games (
@@ -24,13 +28,13 @@ impl ChessDatabase<'_> {
             );
 
             CREATE TABLE zobrist (
-            zhash    INTEGER,
-            game_id INTEGER,
-            move_san TEXT,
-            move_num INTEGER
+            zhash    BLOB PRIMARY KEY,
+            game_ids_moves JSON
         )",
             )
-            .into()
+            .into();
+        println!("Created tables");
+        return_value
     }
 
     pub(crate) fn insert_full_game(
@@ -58,17 +62,24 @@ impl ChessDatabase<'_> {
 
     // TODO: optimise space in zobrist by only having one row for each zobrist and a JSON column (containing game ids, moves and move nums)
     // Storing json like this will save many rows, and also we're all web shits here so storing JSON in our database is just good practice
-    pub(crate) fn insert_zobrist(&self, zhash: u64, id: u64, san: SanPlus, move_num: u16) {
+    pub(crate) fn insert_zobrist(&self, zhash: u64, id: u64, san: SanPlus) {
         let mut stmt = self
             .0
             .prepare_cached(
                 "
-        INSERT INTO zobrist (zhash, game_id, move_san, move_num) 
-        VALUES (?1, ?2, ?3, ?4)",
+        INSERT INTO zobrist (zhash, game_ids_moves) 
+        VALUES (?1, json_array(?2))
+        ON CONFLICT(zhash) DO UPDATE SET
+            game_ids_moves = json_insert(game_ids_moves, '$[#]', json(?2))",
             )
             .expect("Failed to create cached statement");
 
-        stmt.execute(params![zhash.to_le_bytes(), id, san.to_string(), move_num])
-            .unwrap();
+        let san_string = san.to_string();
+        stmt.execute(params![
+            zhash.to_le_bytes(),
+            // &format!("{{\"game_id\": {id}, \"move_san\": {san_string} }}"),
+            id,
+        ])
+        .unwrap();
     }
 }
